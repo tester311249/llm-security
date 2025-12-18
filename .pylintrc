@@ -1,0 +1,21 @@
+[pylint]
+max-line-length = 127
+disable = 
+    C0111,  # missing-docstring
+    R0903,  # too-few-public-methods
+    R0913,  # too-many-arguments
+    C0301,  # line-too-long
+
+[pylint.messages_control]
+confidence = HIGH
+
+[pylint.reports]
+output-format = colorized
+reports = no
+
+[pylint.format]
+max-line-length = 127
+indent-string = '    '
+
+[pylint.basic]
+good-names = i,j,k,ex,Run,_,id,db

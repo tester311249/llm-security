@@ -1,0 +1,216 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/krackenservices/scp-definition/main/spec/scp.schema.json
+scp: "0.1.0"
+
+system:
+  urn: "urn:scp:llm-security:prompt-injection-detector"
+  name: "Prompt Injection Detection Service"
+  description: "Multi-layered detection system for identifying and mitigating prompt injection attacks against Large Language Models"
+  classification:
+    tier: 1  # Critical security service
+    domain: "security"
+    tags:
+      - "llm-security"
+      - "prompt-injection"
+      - "api-security"
+      - "genai-security"
+
+ownership:
+  team: "genai-security"
+  contacts:
+    - type: "email"
+      ref: "mailto:genai-security@company.com"
+    - type: "slack"
+      ref: "slack://channel/C-GENAI-SECURITY"
+    - type: "pagerduty"
+      ref: "https://pagerduty.com/services/GENAI-SECURITY"
+  escalation:
+    - "genai-security"
+    - "platform-security"
+    - "incident-response"
+
+provides:
+  - capability: "prompt-injection-detection"
+    type: "rest"
+    contract:
+      type: "openapi"
+      ref: "./docs/api-spec.yaml"
+    sla:
+      availability: "99.95%"
+      latency_p50_ms: 20
+      latency_p95_ms: 50
+      latency_p99_ms: 150
+      throughput_rps: 10000
+    endpoints:
+      - path: "/api/v1/detect"
+        method: "POST"
+        description: "Analyze prompt for injection attempts"
+      - path: "/api/v1/sanitize"
+        method: "POST"
+        description: "Sanitize detected malicious prompts"
+      - path: "/api/v1/health"
+        method: "GET"
+        description: "Health check endpoint"
+
+  - capability: "prompt-sanitization"
+    type: "library"
+    description: "Sanitize and remediate malicious prompts"
+    
+  - capability: "security-monitoring"
+    type: "observability"
+    description: "Real-time security event monitoring and alerting"
+
+depends:
+  - system: "urn:scp:llm-providers:openai"
+    capability: "llm-inference"
+    type: "rest"
+    criticality: "optional"
+    failure_mode: "degrade"
+    description: "Optional LLM meta-analysis for complex detection"
+    timeout_ms: 5000
+    retry:
+      max_attempts: 2
+      backoff: "exponential"
+    circuit_breaker:
+      failure_threshold: 3
+      reset_timeout_ms: 60000
+
+  - system: "urn:scp:data-store:redis"
+    capability: "cache"
+    type: "data"
+    criticality: "degraded"
+    failure_mode: "bypass"
+    description: "Caching layer for detection results"
+    timeout_ms: 100
+    retry:
+      max_attempts: 1
+      backoff: "none"
+
+  - system: "urn:scp:observability:prometheus"
+    capability: "metrics"
+    type: "observability"
+    criticality: "optional"
+    failure_mode: "continue"
+    description: "Metrics collection and monitoring"
+
+  - system: "urn:scp:logging:elasticsearch"
+    capability: "logs"
+    type: "observability"
+    criticality: "optional"
+    failure_mode: "continue"
+    description: "Centralized logging for audit trail"
+
+runtime:
+  environments:
+    production:
+      otel_service_name: "prompt-injection-detector"
+      deployment:
+        type: "kubernetes"
+        namespace: "genai-security"
+        replicas: 10
+        resources:
+          requests:
+            cpu: "1000m"
+            memory: "2Gi"
+          limits:
+            cpu: "2000m"
+            memory: "4Gi"
+      endpoints:
+        - url: "https://api.company.com/security/prompt-injection"
+          environment: "production"
+    
+    staging:
+      otel_service_name: "prompt-injection-detector-staging"
+      deployment:
+        type: "kubernetes"
+        namespace: "genai-security-staging"
+        replicas: 2
+      endpoints:
+        - url: "https://api-staging.company.com/security/prompt-injection"
+          environment: "staging"
+    
+    development:
+      otel_service_name: "prompt-injection-detector-dev"
+      deployment:
+        type: "docker-compose"
+      endpoints:
+        - url: "http://localhost:8000"
+          environment: "development"
+
+security:
+  authentication:
+    - type: "api-key"
+      required: true
+    - type: "jwt"
+      required: false
+  authorization:
+    - type: "rbac"
+      roles:
+        - "security-admin"
+        - "api-consumer"
+  data_classification: "confidential"
+  pii_handling: "redacted"
+  compliance:
+    - "SOC2"
+    - "ISO27001"
+    - "GDPR"
+
+monitoring:
+  metrics:
+    - name: "detection_accuracy"
+      type: "gauge"
+      description: "Detection accuracy percentage"
+    - name: "false_positive_rate"
+      type: "gauge"
+      description: "False positive rate"
+    - name: "request_latency"
+      type: "histogram"
+      description: "Request processing latency"
+    - name: "threat_level_distribution"
+      type: "counter"
+      description: "Distribution of detected threat levels"
+  
+  alerts:
+    - name: "high_false_positive_rate"
+      condition: "false_positive_rate > 0.05"
+      severity: "P1"
+      channels:
+        - "pagerduty"
+        - "slack"
+    - name: "detection_accuracy_drop"
+      condition: "detection_accuracy < 0.95"
+      severity: "P2"
+      channels:
+        - "slack"
+    - name: "latency_spike"
+      condition: "p99_latency > 200ms"
+      severity: "P2"
+      channels:
+        - "slack"
+    - name: "new_attack_pattern"
+      condition: "unknown_pattern_detected"
+      severity: "P3"
+      channels:
+        - "slack"
+
+documentation:
+  readme: "./README.md"
+  architecture: "./architecture.md"
+  quickstart: "./QUICKSTART.md"
+  api_docs: "./docs/api-spec.yaml"
+  runbook: "./docs/runbook.md"
+  
+metadata:
+  version: "1.0.0"
+  created: "2024-12-11"
+  updated: "2025-12-17"
+  repository: "https://github.com/your-org/llm-security"
+  ci_cd:
+    pipeline: "github-actions"
+    deployment_frequency: "continuous"
+  tech_stack:
+    - "Python 3.11"
+    - "FastAPI"
+    - "Docker"
+    - "Kubernetes"
+    - "Redis"
+    - "Prometheus"
