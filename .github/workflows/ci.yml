@@ -1,10 +1,11 @@
 name: CI Pipeline
 
+# DISABLED - Only pr-checks.yml is active
 on:
-  push:
-    branches: [ main, develop ]
-  pull_request:
-    branches: [ main, develop ]
+  # push:
+  #   branches: [ main, develop ]
+  # pull_request:
+  #   branches: [ main, develop ]
   workflow_dispatch:
 
 jobs:

@@ -1,11 +1,12 @@
 name: CD Pipeline
 
+# DISABLED - Only pr-checks.yml is active
 on:
-  push:
-    tags:
-      - 'v*.*.*'
-  release:
-    types: [published]
+  # push:
+  #   tags:
+  #     - 'v*.*.*'
+  # release:
+  #   types: [published]
   workflow_dispatch:
     inputs:
       environment:
