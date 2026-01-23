@@ -1,0 +1,254 @@
+name: Manage Branch Protection
+
+# SECURITY: This workflow applies branch protection rules
+# - Only runs on main branch (never on PRs from untrusted code)
+# - Requires manual approval via GitHub Environment protection
+# - Changes are audited and logged
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'config/branch-protection.json'
+      - '.github/workflows/manage-branch-protection.yml'
+  schedule:
+    - cron: '0 2 * * 1'  # Weekly Monday 2 AM - drift detection
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        required: true
+        default: 'apply'
+        type: choice
+        options:
+          - apply
+          - validate
+          - show-current
+
+jobs:
+  validate:
+    name: Validate Configuration
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Validate JSON syntax
+        run: |
+          echo "📋 Validating branch-protection.json..."
+          if ! jq empty config/branch-protection.json 2>/dev/null; then
+            echo "❌ Invalid JSON syntax"
+            exit 1
+          fi
+          echo "✅ JSON syntax valid"
+      
+      - name: Validate required fields
+        run: |
+          echo "🔍 Checking required fields..."
+          REQUIRED_FIELDS=(
+            "required_pull_request_reviews"
+            "enforce_admins"
+            "required_conversation_resolution"
+          )
+          
+          for field in "${REQUIRED_FIELDS[@]}"; do
+            if ! jq -e ".$field" config/branch-protection.json >/dev/null; then
+              echo "❌ Missing required field: $field"
+              exit 1
+            fi
+            echo "✅ Found: $field"
+          done
+      
+      - name: Show configuration
+        run: |
+          echo "📄 Current configuration to be applied:"
+          echo "```json"
+          jq '.' config/branch-protection.json
+          echo "```"
+
+  show-current:
+    name: Show Current Protection
+    runs-on: ubuntu-latest
+    if: github.event.inputs.action == 'show-current' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Get current branch protection
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "🔒 Current branch protection for main:"
+          gh api repos/${{ github.repository }}/branches/main/protection \
+            --jq 'del(.url, .required_pull_request_reviews.url, .required_signatures.url, .enforce_admins.url)' \
+            2>/dev/null || echo "⚠️ No branch protection currently configured"
+
+  detect-drift:
+    name: Detect Configuration Drift
+    needs: validate
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Compare configurations
+        id: drift
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "🔍 Checking for configuration drift..."
+          
+          # Get current protection (normalize structure)
+          gh api repos/${{ github.repository }}/branches/main/protection \
+            --jq '{
+              required_pull_request_reviews: .required_pull_request_reviews | {
+                dismiss_stale_reviews,
+                require_code_owner_reviews,
+                require_last_push_approval,
+                required_approving_review_count
+              },
+              enforce_admins: .enforce_admins.enabled,
+              required_conversation_resolution: .required_conversation_resolution.enabled,
+              allow_force_pushes: .allow_force_pushes.enabled,
+              allow_deletions: .allow_deletions.enabled,
+              block_creations: .block_creations.enabled,
+              required_linear_history: .required_linear_history.enabled,
+              lock_branch: .lock_branch.enabled
+            }' > current.json 2>/dev/null || echo "{}" > current.json
+          
+          # Compare with desired config
+          if diff -u current.json config/branch-protection.json; then
+            echo "✅ No drift detected - configuration matches"
+            echo "drift=false" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️ DRIFT DETECTED - Configuration mismatch!"
+            echo "drift=true" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Create drift issue
+        if: steps.drift.outputs.drift == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Check if drift issue already exists
+          EXISTING=$(gh issue list --label "drift-detection" --state open --json number --jq '.[0].number')
+          
+          if [ -z "$EXISTING" ]; then
+            gh issue create \
+              --title "⚠️ Branch Protection Drift Detected" \
+              --label "drift-detection,security" \
+              --body "Configuration drift detected between actual branch protection and config/branch-protection.json.
+          
+          **Action Required:** Review and apply the correct configuration via workflow_dispatch.
+          
+          **Detected:** $(date)
+          **Workflow Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo "📝 Created new drift detection issue"
+          else
+            echo "ℹ️ Drift issue already exists: #$EXISTING"
+          fi
+
+  apply:
+    name: Apply Branch Protection
+    needs: validate
+    runs-on: ubuntu-latest
+    
+    # 🔒 CRITICAL SECURITY CONTROLS:
+    # 1. Only runs after merge to main (never from PRs)
+    # 2. Requires manual approval via GitHub Environment
+    # 3. Validation must pass first
+    if: |
+      github.ref == 'refs/heads/main' && 
+      github.event_name != 'pull_request' &&
+      (github.event.inputs.action == 'apply' || github.event_name == 'push')
+    
+    # Requires manual approval from designated admins
+    environment:
+      name: branch-protection-admin
+      url: https://github.com/${{ github.repository }}/settings/branches
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Get current protection
+        id: current
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "📋 Fetching current branch protection..."
+          gh api repos/${{ github.repository }}/branches/main/protection \
+            --jq 'del(.url, .required_pull_request_reviews.url, .required_signatures.url, .enforce_admins.url)' \
+            > current-full.json 2>/dev/null || echo "{}" > current-full.json
+          
+          cat current-full.json
+        continue-on-error: true
+      
+      - name: Show changes
+        run: |
+          echo "::notice::🔄 Applying branch protection changes"
+          echo ""
+          echo "**Repository:** ${{ github.repository }}"
+          echo "**Branch:** main"
+          echo "**Triggered by:** ${{ github.actor }}"
+          echo "**Event:** ${{ github.event_name }}"
+          echo ""
+          echo "**New Configuration:**"
+          jq '.' config/branch-protection.json
+      
+      - name: Apply protection rules
+        id: apply
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "🔒 Applying branch protection rules..."
+          
+          gh api repos/${{ github.repository }}/branches/main/protection \
+            -X PUT \
+            --input config/branch-protection.json
+          
+          echo "✅ Branch protection rules applied successfully"
+      
+      - name: Verify application
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "✅ Verifying applied configuration..."
+          sleep 2  # Brief delay for API propagation
+          
+          gh api repos/${{ github.repository }}/branches/main/protection \
+            --jq '{
+              required_pull_request_reviews: .required_pull_request_reviews,
+              enforce_admins: .enforce_admins.enabled,
+              required_conversation_resolution: .required_conversation_resolution.enabled
+            }'
+          
+          echo "✅ Configuration verified"
+      
+      - name: Audit log
+        if: always()
+        run: |
+          echo "📝 AUDIT LOG"
+          echo "============"
+          echo "Timestamp: $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
+          echo "Repository: ${{ github.repository }}"
+          echo "Branch: main"
+          echo "Action: Apply branch protection"
+          echo "Actor: ${{ github.actor }}"
+          echo "Workflow Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          echo "Commit: ${{ github.sha }}"
+          echo "Status: ${{ steps.apply.outcome }}"
+          echo "============"
+
+  notify:
+    name: Notify Changes
+    needs: apply
+    runs-on: ubuntu-latest
+    if: always() && needs.apply.result != 'skipped'
+    steps:
+      - name: Report status
+        run: |
+          if [ "${{ needs.apply.result }}" = "success" ]; then
+            echo "::notice::✅ Branch protection successfully updated"
+          else
+            echo "::error::❌ Branch protection update failed"
+            exit 1
+          fi

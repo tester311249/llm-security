@@ -1,0 +1,77 @@
+# CODEOWNERS - Define mandatory reviewers for LLM Security Project
+# This file defines which teams/users must review and approve changes to specific paths
+#
+# Format: <file pattern> @team-name @username
+# Documentation: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# ============================================================================
+# SECURITY-CRITICAL FILES - Require security review
+# ============================================================================
+
+# Core Security Detection Logic - MANDATORY SECURITY REVIEW
+/prompt_injection_detector.py @tester311249
+/api_service.py @tester311249
+/test_detector.py @tester311249
+
+# Security Design Documentation - MANDATORY SECURITY REVIEW
+/enterprise-prompt-injection-detection-design.md @tester311249
+/architecture.md @tester311249
+
+# ============================================================================
+# INFRASTRUCTURE & DEPLOYMENT - Require platform/devops review
+# ============================================================================
+
+# Kubernetes Configuration
+/k8s-deployment.yaml @tester311249
+*.yaml @tester311249
+*.yml @tester311249
+
+# Docker Configuration
+/Dockerfile @tester311249
+/docker-compose.yml @tester311249
+
+# CI/CD Pipelines - MANDATORY DEVOPS REVIEW
+/.github/workflows/ @tester311249
+/CICD.md @tester311249
+
+# Service Control Policy
+/scp.yaml @tester311249
+
+# ============================================================================
+# DOCUMENTATION - Recommended review
+# ============================================================================
+
+/README.md @tester311249
+/QUICKSTART.md @tester311249
+/PROJECT_SUMMARY.md @tester311249
+/INDEX.md @tester311249
+/docs/ @tester311249
+
+# ============================================================================
+# PYTHON CODE - Standard review
+# ============================================================================
+
+*.py @tester311249
+
+# ============================================================================
+# DEFAULT - All other files require maintainer approval
+# ============================================================================
+
+* @tester311249
+
+# ====================================================================
+# BRANCH PROTECTION & SECURITY CONFIGURATION - ADMIN APPROVAL REQUIRED
+# ====================================================================
+# These files control repository security settings and must be carefully reviewed
+# Modifying these files could disable security controls
+
+# Branch protection configuration - CRITICAL
+/config/branch-protection.json @tester311249
+/scripts/validate-protection-config.sh @tester311249
+
+# Workflows that modify security settings - CRITICAL
+/.github/workflows/manage-branch-protection.yml @tester311249
+/.github/workflows/validate-codeowners.yml @tester311249
+
+# CODEOWNERS itself - CRITICAL (protects this file)
+/.github/CODEOWNERS @tester311249
