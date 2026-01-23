@@ -1,7 +1,7 @@
 # Multi-stage Docker build for prompt injection detector
 
 # Stage 1: Builder
-FROM python:3.11-slim as builder
+FROM python:3.11-slim AS builder
 
 WORKDIR /build
 
@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Copy requirements and install dependencies
 COPY requirements.txt .
-RUN pip install --user --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
 # Stage 2: Runtime
 FROM python:3.11-slim
@@ -27,7 +27,7 @@ RUN useradd -m -u 1000 appuser
 WORKDIR /app
 
 # Copy Python dependencies from builder
-COPY --from=builder /root/.local /home/appuser/.local
+COPY --from=builder /install /usr/local
 
 # Copy application files
 COPY prompt_injection_detector.py .
@@ -38,9 +38,6 @@ RUN chown -R appuser:appuser /app
 
 # Switch to non-root user
 USER appuser
-
-# Make sure scripts in .local are usable
-ENV PATH=/home/appuser/.local/bin:$PATH
 
 # Expose API port
 EXPOSE 8000

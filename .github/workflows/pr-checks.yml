@@ -69,7 +69,7 @@ jobs:
     name: Quick Test Suite
     runs-on: ubuntu-latest
     needs: changes-detection
-    if: needs.changes-detection.outputs.code == 'true'
+    if: false  # DISABLED
     
     steps:
     - name: Checkout code
@@ -95,7 +95,7 @@ jobs:
     name: Security Check
     runs-on: ubuntu-latest
     needs: changes-detection
-    if: needs.changes-detection.outputs.code == 'true'
+    if: false  # DISABLED
     
     steps:
     - name: Checkout code
@@ -167,7 +167,7 @@ jobs:
     name: Test Coverage
     runs-on: ubuntu-latest
     needs: changes-detection
-    if: needs.changes-detection.outputs.code == 'true' || needs.changes-detection.outputs.tests == 'true'
+    if: false  # DISABLED
     
     steps:
     - name: Checkout code

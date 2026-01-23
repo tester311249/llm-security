@@ -1,7 +1,5 @@
 # Prompt Injection Detection System Requirements
-
-# Core dependencies
-python>=3.11
+# Python version: 3.11+ (specified in Dockerfile)
 
 # API and web framework
 fastapi==0.104.1
