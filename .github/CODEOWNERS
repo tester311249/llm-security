@@ -58,3 +58,20 @@
 # ============================================================================
 
 * @tester311249
+
+# ====================================================================
+# BRANCH PROTECTION & SECURITY CONFIGURATION - ADMIN APPROVAL REQUIRED
+# ====================================================================
+# These files control repository security settings and must be carefully reviewed
+# Modifying these files could disable security controls
+
+# Branch protection configuration - CRITICAL
+/config/branch-protection.json @tester311249
+/scripts/validate-protection-config.sh @tester311249
+
+# Workflows that modify security settings - CRITICAL
+/.github/workflows/manage-branch-protection.yml @tester311249
+/.github/workflows/validate-codeowners.yml @tester311249
+
+# CODEOWNERS itself - CRITICAL (protects this file)
+/.github/CODEOWNERS @tester311249
