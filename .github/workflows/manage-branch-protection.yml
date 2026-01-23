@@ -172,7 +172,7 @@ jobs:
       - name: Get current protection
         id: current
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.BRANCH_PROTECTION_TOKEN }}
         run: |
           echo "📋 Fetching current branch protection..."
           gh api repos/${{ github.repository }}/branches/main/protection \
@@ -197,7 +197,7 @@ jobs:
       - name: Apply protection rules
         id: apply
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.BRANCH_PROTECTION_TOKEN }}
         run: |
           echo "🔒 Applying branch protection rules..."
           
@@ -209,7 +209,7 @@ jobs:
       
       - name: Verify application
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.BRANCH_PROTECTION_TOKEN }}
         run: |
           echo "✅ Verifying applied configuration..."
           sleep 2  # Brief delay for API propagation
