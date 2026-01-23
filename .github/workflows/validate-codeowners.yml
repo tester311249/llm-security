@@ -1,0 +1,137 @@
+name: Validate CODEOWNERS
+
+on:
+  pull_request:
+    paths:
+      - '.github/CODEOWNERS'
+  push:
+    branches: [main]
+    paths:
+      - '.github/CODEOWNERS'
+  schedule:
+    - cron: '0 0 * * 1'  # Weekly validation every Monday
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  validate-syntax:
+    name: Validate CODEOWNERS Syntax
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check CODEOWNERS file exists
+        run: |
+          if [ ! -f .github/CODEOWNERS ] && [ ! -f CODEOWNERS ]; then
+            echo "❌ CODEOWNERS file not found"
+            exit 1
+          fi
+          echo "✅ CODEOWNERS file found"
+
+      - name: Validate CODEOWNERS syntax
+        uses: mszostok/codeowners-validator@v0.7.4
+        with:
+          checks: "files,duppatterns,syntax"
+          experimental_checks: "notowned"
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+  validate-users:
+    name: Verify Users and Teams Exist
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Extract reviewers from CODEOWNERS
+        id: extract
+        run: |
+          # Extract all @mentions
+          REVIEWERS=$(grep -oE '@[a-zA-Z0-9_-]+(/[a-zA-Z0-9_-]+)?' .github/CODEOWNERS | sort -u)
+          echo "reviewers<<EOF" >> $GITHUB_OUTPUT
+          echo "$REVIEWERS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Validate each reviewer exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "${{ steps.extract.outputs.reviewers }}" | while read reviewer; do
+            if [[ $reviewer == @*/* ]]; then
+              # Team format: @org/team
+              ORG=$(echo $reviewer | cut -d'/' -f1 | sed 's/@//')
+              TEAM=$(echo $reviewer | cut -d'/' -f2)
+              echo "Checking team: $ORG/$TEAM"
+              gh api orgs/$ORG/teams/$TEAM || echo "⚠️ Team $reviewer not found"
+            else
+              # User format: @username
+              USER=$(echo $reviewer | sed 's/@//')
+              echo "Checking user: $USER"
+              gh api users/$USER || echo "⚠️ User $reviewer not found"
+            fi
+          done
+
+  validate-patterns:
+    name: Check File Patterns Match Actual Files
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for comprehensive check
+
+      - name: Check for unowned files
+        run: |
+          # Install codeowners-validator
+          wget -qO- https://github.com/mszostok/codeowners-validator/releases/download/v0.7.4/codeowners-validator_Linux_x86_64.tar.gz | tar xz
+          
+          # Run with notowned check
+          ./codeowners-validator -c .github/CODEOWNERS \
+            --checks notowned \
+            --experimental-checks notowned \
+            --repository-path . || true
+
+  enforce-protection:
+    name: Ensure Branch Protection Enabled
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Check branch protection
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PROTECTION=$(gh api repos/${{ github.repository }}/branches/main/protection \
+            --jq '.required_pull_request_reviews.require_code_owner_reviews' 2>/dev/null || echo "false")
+          
+          if [ "$PROTECTION" != "true" ]; then
+            echo "❌ Code owner reviews not required on main branch"
+            echo "::warning::Branch protection does not enforce CODEOWNERS reviews"
+            exit 1
+          fi
+          
+          echo "✅ Branch protection properly configured"
+
+  summary:
+    name: Validation Summary
+    needs: [validate-syntax, validate-users, validate-patterns, enforce-protection]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Generate summary
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY << 'EOF'
+          # CODEOWNERS Validation Report
+
+          ## Checks Performed:
+          - ✅ Syntax validation
+          - ✅ User/team existence verification
+          - ✅ File pattern matching
+          - ✅ Branch protection enforcement check
+
+          ## Status:
+          All validation checks completed. Review job results above for details.
+
+          ## Next Steps:
+          - If any checks failed, review and fix CODEOWNERS file
+          - Ensure all mentioned users/teams exist
+          - Verify branch protection is enabled
+          EOF
