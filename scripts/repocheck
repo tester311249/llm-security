@@ -1,0 +1,309 @@
+#!/usr/bin/env bash
+# repocheck - Compare actual vs desired branch protection (READ-ONLY)
+# 
+# This script performs read-only validation of branch protection settings
+# against a configuration file. It requires no write permissions.
+#
+# Usage: repocheck <owner/repo> [config-file] [output-format] [branch]
+#
+# Arguments:
+#   owner/repo     - GitHub repository (e.g., tester311249/llm-security)
+#   config-file    - Path to YAML/JSON config (default: .github/branch-protection.yml)
+#   output-format  - Output format: text|json|yaml (default: text)
+#   branch         - Branch to check (default: main)
+#
+# Exit Codes:
+#   0 - Configuration matches (no drift)
+#   1 - Configuration drift detected
+#   2 - Error (missing tools, API failure, etc.)
+#
+# Examples:
+#   repocheck tester311249/llm-security
+#   repocheck tester311249/llm-security .github/branch-protection.yml json
+#   repocheck org/repo config/branch-protection.json yaml main
+
+set -euo pipefail
+
+# Parse arguments
+REPO="${1:?Repository required (format: owner/repo)}"
+CONFIG_FILE="${2:-.github/branch-protection.yml}"
+OUTPUT_FORMAT="${3:-text}"
+BRANCH="${4:-main}"
+
+# Color codes for text output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Temporary file cleanup
+cleanup() {
+    rm -f /tmp/repocheck-current-$$.json /tmp/repocheck-desired-$$.json \
+          /tmp/repocheck-result-$$.json /tmp/repocheck-error-$$.txt
+}
+trap cleanup EXIT
+
+# Check required tools
+check_dependencies() {
+    local missing=()
+    
+    if ! command -v gh &> /dev/null; then
+        missing+=("gh (GitHub CLI)")
+    fi
+    
+    if ! command -v jq &> /dev/null; then
+        missing+=("jq")
+    fi
+    
+    if ! command -v yq &> /dev/null && [[ "$CONFIG_FILE" =~ \.ya?ml$ ]]; then
+        missing+=("yq (for YAML parsing)")
+    fi
+    
+    if [ ${#missing[@]} -gt 0 ]; then
+        echo "❌ Missing required tools: ${missing[*]}" >&2
+        echo "   Install instructions:" >&2
+        for tool in "${missing[@]}"; do
+            case "$tool" in
+                "gh (GitHub CLI)")
+                    echo "   - GitHub CLI: https://cli.github.com/manual/installation" >&2
+                    ;;
+                "jq")
+                    echo "   - jq: https://stedolan.github.io/jq/download/" >&2
+                    ;;
+                "yq (for YAML parsing)")
+                    echo "   - yq: https://github.com/mikefarah/yq#install" >&2
+                    ;;
+            esac
+        done
+        return 1
+    fi
+    return 0
+}
+
+# Fetch current branch protection from GitHub (READ-ONLY)
+fetch_current_protection() {
+    local repo=$1
+    local branch=$2
+    local output_file=$3
+    local error_file=$4
+    
+    if ! gh api "repos/$repo/branches/$branch/protection" > "$output_file" 2> "$error_file"; then
+        if grep -q "Branch not protected" "$error_file" 2>/dev/null; then
+            echo "⚠️  Branch '$branch' is not currently protected" >&2
+            return 1
+        elif grep -q "Not Found" "$error_file" 2>/dev/null; then
+            echo "❌ Repository or branch not found: $repo (branch: $branch)" >&2
+            return 2
+        else
+            echo "❌ Failed to fetch branch protection:" >&2
+            cat "$error_file" >&2
+            return 2
+        fi
+    fi
+    return 0
+}
+
+# Convert config file to JSON
+convert_config_to_json() {
+    local config_file=$1
+    local output_file=$2
+    
+    if [ ! -f "$config_file" ]; then
+        echo "❌ Configuration file not found: $config_file" >&2
+        return 2
+    fi
+    
+    if [[ "$config_file" =~ \.ya?ml$ ]]; then
+        if ! yq eval -o=json "$config_file" > "$output_file" 2>/dev/null; then
+            echo "❌ Failed to parse YAML configuration file" >&2
+            return 2
+        fi
+    else
+        if ! jq '.' "$config_file" > "$output_file" 2>/dev/null; then
+            echo "❌ Failed to parse JSON configuration file" >&2
+            return 2
+        fi
+    fi
+    return 0
+}
+
+# Normalize and compare configurations
+compare_configurations() {
+    local current_file=$1
+    local desired_file=$2
+    local result_file=$3
+    
+    jq --slurp '
+    # Normalize actual GitHub API response
+    def normalize_actual:
+      {
+        required_pull_request_reviews: (
+          if .required_pull_request_reviews then
+            .required_pull_request_reviews | {
+              dismiss_stale_reviews,
+              require_code_owner_reviews,
+              require_last_push_approval,
+              required_approving_review_count
+            }
+          else null end
+        ),
+        required_status_checks: .required_status_checks,
+        enforce_admins: (.enforce_admins.enabled // false),
+        required_conversation_resolution: (.required_conversation_resolution.enabled // false),
+        allow_force_pushes: (.allow_force_pushes.enabled // false),
+        allow_deletions: (.allow_deletions.enabled // false),
+        block_creations: (.block_creations.enabled // false),
+        required_linear_history: (.required_linear_history.enabled // false),
+        lock_branch: (.lock_branch.enabled // false),
+        restrictions: .restrictions
+      };
+    
+    # Normalize desired configuration
+    def normalize_desired:
+      if .branch_protection then .branch_protection else . end
+      | {
+        required_pull_request_reviews,
+        required_status_checks,
+        enforce_admins,
+        required_conversation_resolution,
+        allow_force_pushes,
+        allow_deletions,
+        block_creations,
+        required_linear_history,
+        lock_branch,
+        restrictions
+      };
+    
+    # Generate comparison result
+    {
+      actual: (.[0] | normalize_actual),
+      desired: (.[1] | normalize_desired)
+    } | {
+      matches: (.actual == .desired),
+      differences: (
+        if .actual == .desired then []
+        else 
+          # Compare each field
+          [.actual, .desired] as [$a, $d]
+          | ($a | keys + ($d | keys) | unique) as $all_keys
+          | $all_keys[]
+          | select($a[.] != $d[.])
+          | {
+              field: .,
+              actual: $a[.],
+              expected: $d[.]
+            }
+        end
+      ),
+      summary: {
+        total_fields: ([.actual, .desired] | .[0] | keys | length),
+        mismatched_fields: (
+          if .actual == .desired then 0
+          else
+            [.actual, .desired] as [$a, $d]
+            | ($a | keys + ($d | keys) | unique)
+            | map(select($a[.] != $d[.]))
+            | length
+          end
+        )
+      }
+    }
+    ' "$current_file" "$desired_file" > "$result_file"
+}
+
+# Output results based on format
+output_results() {
+    local result_file=$1
+    local format=$2
+    
+    local matches=$(jq -r '.matches' "$result_file")
+    
+    case "$format" in
+        json)
+            cat "$result_file"
+            ;;
+        yaml)
+            jq '.' "$result_file" | yq eval -P -
+            ;;
+        text)
+            local total=$(jq -r '.summary.total_fields' "$result_file")
+            local mismatched=$(jq -r '.summary.mismatched_fields' "$result_file")
+            
+            echo ""
+            echo "Branch Protection Validation Report"
+            echo "===================================="
+            echo "Repository: $REPO"
+            echo "Branch: $BRANCH"
+            echo "Config File: $CONFIG_FILE"
+            echo ""
+            
+            if [ "$matches" = "true" ]; then
+                echo -e "${GREEN}✅ Configuration matches - no drift detected${NC}"
+                echo ""
+                echo "All $total protection settings match the desired configuration."
+            else
+                echo -e "${YELLOW}⚠️  Configuration drift detected${NC}"
+                echo ""
+                echo "Found $mismatched mismatched field(s) out of $total total settings:"
+                echo ""
+                
+                jq -r '.differences[] | 
+                    "  \u001b[1m\(.field)\u001b[0m:\n" +
+                    "    Actual:   \u001b[33m\(.actual)\u001b[0m\n" +
+                    "    Expected: \u001b[32m\(.expected)\u001b[0m\n"
+                ' "$result_file"
+                
+                echo ""
+                echo -e "${BLUE}ℹ️  Action Required:${NC}"
+                echo "   Review the differences above and update the branch protection"
+                echo "   settings or configuration file as needed."
+            fi
+            echo ""
+            ;;
+        *)
+            echo "❌ Invalid output format: $format (must be: text|json|yaml)" >&2
+            return 2
+            ;;
+    esac
+    
+    [ "$matches" = "true" ] && return 0 || return 1
+}
+
+# Main execution
+main() {
+    if [ "$OUTPUT_FORMAT" = "text" ]; then
+        echo "🔍 Checking repository: $REPO (branch: $BRANCH)" >&2
+    fi
+    
+    # Check dependencies
+    if ! check_dependencies; then
+        exit 2
+    fi
+    
+    # Fetch current protection
+    if ! fetch_current_protection "$REPO" "$BRANCH" \
+        "/tmp/repocheck-current-$$.json" "/tmp/repocheck-error-$$.txt"; then
+        exit $?
+    fi
+    
+    # Convert config to JSON
+    if ! convert_config_to_json "$CONFIG_FILE" "/tmp/repocheck-desired-$$.json"; then
+        exit 2
+    fi
+    
+    # Compare configurations
+    if ! compare_configurations \
+        "/tmp/repocheck-current-$$.json" \
+        "/tmp/repocheck-desired-$$.json" \
+        "/tmp/repocheck-result-$$.json"; then
+        echo "❌ Failed to compare configurations" >&2
+        exit 2
+    fi
+    
+    # Output results and return appropriate exit code
+    output_results "/tmp/repocheck-result-$$.json" "$OUTPUT_FORMAT"
+}
+
+# Run main function
+main

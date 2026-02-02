@@ -1,0 +1,59 @@
+# Branch Protection Configuration
+# This file defines the desired branch protection settings for the main branch
+# Documentation: https://docs.github.com/en/rest/branches/branch-protection
+
+branch_protection:
+  # Target branch
+  branch: main
+  
+  # Pull Request Reviews
+  required_pull_request_reviews:
+    # Dismiss stale approvals when new commits are pushed
+    dismiss_stale_reviews: true
+    
+    # Require approval from code owners (defined in CODEOWNERS)
+    require_code_owner_reviews: true
+    
+    # Require approval from the most recent push
+    require_last_push_approval: false
+    
+    # Number of required approving reviews
+    required_approving_review_count: 2
+    
+    # Restrictions on who can dismiss reviews (empty = no restrictions)
+    dismissal_restrictions: {}
+  
+  # Required Status Checks
+  # Set to null to allow any checks, or specify required checks:
+  # required_status_checks:
+  #   strict: true
+  #   contexts:
+  #     - "ci/tests"
+  #     - "security/checkov"
+  required_status_checks: null
+  
+  # Protection Settings
+  
+  # Enforce all configured restrictions for administrators
+  enforce_admins: true
+  
+  # Require all conversations to be resolved before merging
+  required_conversation_resolution: true
+  
+  # Allow force pushes (should be false for protected branches)
+  allow_force_pushes: false
+  
+  # Allow branch deletions (should be false for protected branches)
+  allow_deletions: false
+  
+  # Block creation of branches matching this pattern
+  block_creations: false
+  
+  # Require linear history (no merge commits)
+  required_linear_history: true
+  
+  # Lock branch (makes it read-only)
+  lock_branch: false
+  
+  # Restrictions on who can push to the branch (null = no restrictions)
+  restrictions: null
