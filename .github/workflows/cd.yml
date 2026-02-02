@@ -1,209 +1,209 @@
-name: CD Pipeline
+# name: CD Pipeline
 
-# DISABLED - Only pr-checks.yml is active
-on:
-  # push:
-  #   tags:
-  #     - 'v*.*.*'
-  # release:
-  #   types: [published]
-  workflow_dispatch:
-    inputs:
-      environment:
-        description: 'Deployment environment'
-        required: true
-        default: 'staging'
-        type: choice
-        options:
-          - staging
-          - production
+# # DISABLED - Only pr-checks.yml is active
+# on:
+#   # push:
+#   #   tags:
+#   #     - 'v*.*.*'
+#   # release:
+#   #   types: [published]
+#   workflow_dispatch:
+#     inputs:
+#       environment:
+#         description: 'Deployment environment'
+#         required: true
+#         default: 'staging'
+#         type: choice
+#         options:
+#           - staging
+#           - production
 
-jobs:
-  build-and-test:
-    name: Build and Test
-    runs-on: ubuntu-latest
+# jobs:
+#   build-and-test:
+#     name: Build and Test
+#     runs-on: ubuntu-latest
     
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+#     steps:
+#     - name: Checkout code
+#       uses: actions/checkout@v4
     
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-        cache: 'pip'
+#     - name: Set up Python
+#       uses: actions/setup-python@v5
+#       with:
+#         python-version: '3.11'
+#         cache: 'pip'
     
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pytest pytest-cov wheel setuptools
+#     - name: Install dependencies
+#       run: |
+#         python -m pip install --upgrade pip
+#         pip install -r requirements.txt
+#         pip install pytest pytest-cov wheel setuptools
     
-    - name: Run tests
-      run: |
-        pytest test_detector.py -v --cov=prompt_injection_detector
+#     - name: Run tests
+#       run: |
+#         pytest test_detector.py -v --cov=prompt_injection_detector
     
-    - name: Build distribution packages
-      run: |
-        python setup.py sdist bdist_wheel
-      continue-on-error: true
+#     - name: Build distribution packages
+#       run: |
+#         python setup.py sdist bdist_wheel
+#       continue-on-error: true
     
-    - name: Upload build artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: python-package
-        path: dist/
+#     - name: Upload build artifacts
+#       uses: actions/upload-artifact@v4
+#       with:
+#         name: python-package
+#         path: dist/
 
-  docker-build:
-    name: Build Docker Image
-    runs-on: ubuntu-latest
-    needs: build-and-test
+#   docker-build:
+#     name: Build Docker Image
+#     runs-on: ubuntu-latest
+#     needs: build-and-test
     
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+#     steps:
+#     - name: Checkout code
+#       uses: actions/checkout@v4
     
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
+#     - name: Set up Docker Buildx
+#       uses: docker/setup-buildx-action@v3
     
-    - name: Log in to Docker Hub
-      uses: docker/login-action@v3
-      with:
-        username: ${{ secrets.DOCKER_USERNAME }}
-        password: ${{ secrets.DOCKER_PASSWORD }}
-      continue-on-error: true
+#     - name: Log in to Docker Hub
+#       uses: docker/login-action@v3
+#       with:
+#         username: ${{ secrets.DOCKER_USERNAME }}
+#         password: ${{ secrets.DOCKER_PASSWORD }}
+#       continue-on-error: true
     
-    - name: Extract metadata
-      id: meta
-      uses: docker/metadata-action@v5
-      with:
-        images: |
-          your-dockerhub-user/prompt-injection-detector
-        tags: |
-          type=ref,event=branch
-          type=ref,event=pr
-          type=semver,pattern={{version}}
-          type=semver,pattern={{major}}.{{minor}}
-          type=sha
+#     - name: Extract metadata
+#       id: meta
+#       uses: docker/metadata-action@v5
+#       with:
+#         images: |
+#           your-dockerhub-user/prompt-injection-detector
+#         tags: |
+#           type=ref,event=branch
+#           type=ref,event=pr
+#           type=semver,pattern={{version}}
+#           type=semver,pattern={{major}}.{{minor}}
+#           type=sha
     
-    - name: Build Docker image
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        push: false
-        tags: ${{ steps.meta.outputs.tags }}
-        labels: ${{ steps.meta.outputs.labels }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
-        outputs: type=docker,dest=/tmp/image.tar
+#     - name: Build Docker image
+#       uses: docker/build-push-action@v5
+#       with:
+#         context: .
+#         push: false
+#         tags: ${{ steps.meta.outputs.tags }}
+#         labels: ${{ steps.meta.outputs.labels }}
+#         cache-from: type=gha
+#         cache-to: type=gha,mode=max
+#         outputs: type=docker,dest=/tmp/image.tar
     
-    - name: Upload Docker image artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: docker-image
-        path: /tmp/image.tar
+#     - name: Upload Docker image artifact
+#       uses: actions/upload-artifact@v4
+#       with:
+#         name: docker-image
+#         path: /tmp/image.tar
 
-  deploy-staging:
-    name: Deploy to Staging
-    runs-on: ubuntu-latest
-    needs: [build-and-test, docker-build]
-    environment: staging
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging'
+#   deploy-staging:
+#     name: Deploy to Staging
+#     runs-on: ubuntu-latest
+#     needs: [build-and-test, docker-build]
+#     environment: staging
+#     if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging'
     
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+#     steps:
+#     - name: Checkout code
+#       uses: actions/checkout@v4
     
-    - name: Download artifacts
-      uses: actions/download-artifact@v4
-      with:
-        name: docker-image
-        path: /tmp
+#     - name: Download artifacts
+#       uses: actions/download-artifact@v4
+#       with:
+#         name: docker-image
+#         path: /tmp
     
-    - name: Deploy to staging
-      run: |
-        echo "Deploying to staging environment..."
-        # Add your staging deployment commands here
-        # Example: kubectl apply -f k8s/staging/
-        # Example: helm upgrade --install app ./charts/app --namespace staging
-        echo "✓ Staged deployment completed"
+#     - name: Deploy to staging
+#       run: |
+#         echo "Deploying to staging environment..."
+#         # Add your staging deployment commands here
+#         # Example: kubectl apply -f k8s/staging/
+#         # Example: helm upgrade --install app ./charts/app --namespace staging
+#         echo "✓ Staged deployment completed"
 
-  deploy-production:
-    name: Deploy to Production
-    runs-on: ubuntu-latest
-    needs: [build-and-test, docker-build]
-    environment: production
-    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production')
+#   deploy-production:
+#     name: Deploy to Production
+#     runs-on: ubuntu-latest
+#     needs: [build-and-test, docker-build]
+#     environment: production
+#     if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production')
     
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+#     steps:
+#     - name: Checkout code
+#       uses: actions/checkout@v4
     
-    - name: Download artifacts
-      uses: actions/download-artifact@v4
-      with:
-        name: docker-image
-        path: /tmp
+#     - name: Download artifacts
+#       uses: actions/download-artifact@v4
+#       with:
+#         name: docker-image
+#         path: /tmp
     
-    - name: Deploy to production
-      run: |
-        echo "Deploying to production environment..."
-        # Add your production deployment commands here
-        # Example: kubectl apply -f k8s/production/
-        # Example: helm upgrade --install app ./charts/app --namespace production
-        echo "✓ Production deployment completed"
+#     - name: Deploy to production
+#       run: |
+#         echo "Deploying to production environment..."
+#         # Add your production deployment commands here
+#         # Example: kubectl apply -f k8s/production/
+#         # Example: helm upgrade --install app ./charts/app --namespace production
+#         echo "✓ Production deployment completed"
     
-    - name: Create deployment notification
-      run: |
-        echo "Deployment to production successful"
-        echo "Version: ${{ github.ref_name }}"
-        echo "Commit: ${{ github.sha }}"
+#     - name: Create deployment notification
+#       run: |
+#         echo "Deployment to production successful"
+#         echo "Version: ${{ github.ref_name }}"
+#         echo "Commit: ${{ github.sha }}"
 
-  publish-pypi:
-    name: Publish to PyPI
-    runs-on: ubuntu-latest
-    needs: build-and-test
-    if: github.event_name == 'release'
-    environment: pypi
+#   publish-pypi:
+#     name: Publish to PyPI
+#     runs-on: ubuntu-latest
+#     needs: build-and-test
+#     if: github.event_name == 'release'
+#     environment: pypi
     
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+#     steps:
+#     - name: Checkout code
+#       uses: actions/checkout@v4
     
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
+#     - name: Set up Python
+#       uses: actions/setup-python@v5
+#       with:
+#         python-version: '3.11'
     
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install build twine
+#     - name: Install dependencies
+#       run: |
+#         python -m pip install --upgrade pip
+#         pip install build twine
     
-    - name: Build package
-      run: python -m build
+#     - name: Build package
+#       run: python -m build
     
-    - name: Publish to PyPI
-      env:
-        TWINE_USERNAME: __token__
-        TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
-      run: |
-        twine upload dist/*
-      continue-on-error: true
+#     - name: Publish to PyPI
+#       env:
+#         TWINE_USERNAME: __token__
+#         TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+#       run: |
+#         twine upload dist/*
+#       continue-on-error: true
 
-  smoke-test:
-    name: Smoke Tests
-    runs-on: ubuntu-latest
-    needs: [deploy-staging]
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging'
+#   smoke-test:
+#     name: Smoke Tests
+#     runs-on: ubuntu-latest
+#     needs: [deploy-staging]
+#     if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging'
     
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+#     steps:
+#     - name: Checkout code
+#       uses: actions/checkout@v4
     
-    - name: Run smoke tests
-      run: |
-        echo "Running smoke tests against staging..."
-        # Add smoke test commands here
-        # Example: curl -f https://staging.example.com/health
-        echo "✓ Smoke tests passed"
+#     - name: Run smoke tests
+#       run: |
+#         echo "Running smoke tests against staging..."
+#         # Add smoke test commands here
+#         # Example: curl -f https://staging.example.com/health
+#         echo "✓ Smoke tests passed"
