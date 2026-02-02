@@ -66,12 +66,21 @@
 # Modifying these files could disable security controls
 
 # Branch protection configuration - CRITICAL
-/config/branch-protection.json @tester311249
-/scripts/validate-protection-config.sh @tester311249
+/.github/branch-protection.yml @tester311249
+/config/branch-protection.json @tester311249  # Legacy support
+
+# Validation and checking scripts - CRITICAL
+/scripts/repocheck @tester311249
+/scripts/validate-schema.sh @tester311249
+/scripts/validate-protection-config.sh @tester311249  # Legacy
 
 # Workflows that modify security settings - CRITICAL
 /.github/workflows/manage-branch-protection.yml @tester311249
+/.github/workflows/check-branch-protection.yml @tester311249
 /.github/workflows/validate-codeowners.yml @tester311249
+
+# Pre-commit configuration - IMPORTANT
+/.pre-commit-config.yaml @tester311249
 
 # CODEOWNERS itself - CRITICAL (protects this file)
 /.github/CODEOWNERS @tester311249

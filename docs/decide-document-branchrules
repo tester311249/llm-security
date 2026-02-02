@@ -1,0 +1,12 @@
+Across FOG owned repositories, there are discrepancies between the branch rules enforced. The rules we should enforce are currently documented here.
+
+This documentation should be reviewed, with a list of checks agreed upon and standardised. This is likely to include:
+
+Require signed commits
+
+Require linear history
+
+Rules on specific checks (Checkov, unit tests etc. are excluded from this work, as these are context dependent within each specific repo. These rules can be enforced using ‘Branch protection rules’ and/or ‘Rulesets’ within GitHub, two similar features. We also need to decide which of these to use (or both). FOG repos such as identity store should also be used to understand the current state.
+
+Github documentation on branch rules.
+

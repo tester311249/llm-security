@@ -1,9 +1,9 @@
-name: Manage Branch Protection
+name: Branch Protection Validation
 
-# SECURITY: This workflow applies branch protection rules
-# - Only runs on main branch (never on PRs from untrusted code)
-# - Requires manual approval via GitHub Environment protection
-# - Changes are audited and logged
+# SECURITY: This workflow validates branch protection configuration
+# - Read-only permissions for validation and drift detection
+# - PR validation provides feedback without making changes
+# - Apply job requires manual approval and runs only on main
 
 on:
   push:
@@ -11,14 +11,14 @@ on:
     paths:
       - '.github/branch-protection.yml'
       - 'config/branch-protection.json'  # Legacy support
-      - '.github/workflows/manage-branch-protection.yml'
+      - '.github/workflows/check-branch-protection.yml'
       - 'scripts/repocheck'
       - 'scripts/validate-schema.sh'
   pull_request:
     paths:
       - '.github/branch-protection.yml'
       - 'config/branch-protection.json'  # Legacy support
-      - '.github/workflows/manage-branch-protection.yml'
+      - '.github/workflows/check-branch-protection.yml'
       - 'scripts/repocheck'
       - 'scripts/validate-schema.sh'
   schedule:
@@ -28,53 +28,61 @@ on:
       action:
         description: 'Action to perform'
         required: true
-        default: 'apply'
+        default: 'validate'
         type: choice
         options:
-          - apply
           - validate
+          - apply
           - show-current
 
 jobs:
   validate:
     name: Validate Configuration
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
       
-      - name: Validate JSON syntax
+      - name: Install yq for YAML parsing
         run: |
-          echo "📋 Validating branch-protection.json..."
-          if ! jq empty config/branch-protection.json 2>/dev/null; then
-            echo "❌ Invalid JSON syntax"
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+      
+      - name: Detect configuration file
+        id: detect-config
+        run: |
+          if [ -f ".github/branch-protection.yml" ]; then
+            echo "config_file=.github/branch-protection.yml" >> $GITHUB_OUTPUT
+            echo "config_type=yaml" >> $GITHUB_OUTPUT
+            echo "📋 Using YAML configuration"
+          elif [ -f "config/branch-protection.json" ]; then
+            echo "config_file=config/branch-protection.json" >> $GITHUB_OUTPUT
+            echo "config_type=json" >> $GITHUB_OUTPUT
+            echo "📋 Using legacy JSON configuration"
+          else
+            echo "❌ No configuration file found"
             exit 1
           fi
-          echo "✅ JSON syntax valid"
       
-      - name: Validate required fields
+      - name: Validate configuration schema
         run: |
-          echo "🔍 Checking required fields..."
-          REQUIRED_FIELDS=(
-            "required_pull_request_reviews"
-            "enforce_admins"
-            "required_conversation_resolution"
-          )
-          
-          for field in "${REQUIRED_FIELDS[@]}"; do
-            if ! jq -e ".$field" config/branch-protection.json >/dev/null; then
-              echo "❌ Missing required field: $field"
-              exit 1
-            fi
-            echo "✅ Found: $field"
-          done
+          echo "🔍 Validating configuration schema..."
+          ./scripts/validate-schema.sh ${{ steps.detect-config.outputs.config_file }}
       
       - name: Show configuration
         run: |
-          echo "📄 Current configuration to be applied:"
-          echo "```json"
-          jq '.' config/branch-protection.json
-          echo "```"
+          echo "📄 Current configuration:"
+          if [ "${{ steps.detect-config.outputs.config_type }}" = "yaml" ]; then
+            echo "\`\`\`yaml"
+            cat ${{ steps.detect-config.outputs.config_file }}
+            echo "\`\`\`"
+          else
+            echo "\`\`\`json"
+            jq '.' ${{ steps.detect-config.outputs.config_file }}
+            echo "\`\`\`"
+          fi
 
   pr-feedback:
     name: PR Drift Feedback
@@ -107,12 +115,19 @@ jobs:
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          echo "🔍 Checking for configuration drift..."
+          # Verify gh is authenticated
+          gh auth status || echo "⚠️  Warning: gh authentication may have issues"
+          
           # Run repocheck and capture output
           if ./scripts/repocheck ${{ github.repository }} ${{ steps.detect-config.outputs.config_file }} json > drift-result.json 2>&1; then
             echo "drift=false" >> $GITHUB_OUTPUT
+            echo "✅ No drift detected"
           else
             echo "drift=true" >> $GITHUB_OUTPUT
+            echo "⚠️  Drift detected"
           fi
       
       - name: Comment on PR with drift details
@@ -121,16 +136,15 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           DRIFT_COUNT=$(jq -r '.summary.mismatched_fields // 0' drift-result.json)
-          DRIFT_DETAILS=$(jq -r '.differences[]? | "- **\(.field)**: actual=`\(.actual)`, expected=`\(.expected)`"' drift-result.json | head -20)
           
-          cat > pr-comment.md << 'EOF'
+          cat > pr-comment.md << 'EOFMARKER'
           ## ⚠️ Branch Protection Drift Detected
           
           The proposed configuration differs from current branch protection settings.
           
-          **Found $DRIFT_COUNT mismatched field(s):**
+          **Found **DRIFT_COUNT_PLACEHOLDER** mismatched field(s):**
           
-          $DRIFT_DETAILS
+          DRIFT_DETAILS_PLACEHOLDER
           
           ---
           
@@ -140,11 +154,16 @@ jobs:
           - Request approval from security team before merging
           
           **Workflow Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          EOF
+          EOFMARKER
           
-          # Expand variables in the comment
-          export DRIFT_COUNT DRIFT_DETAILS
-          envsubst < pr-comment.md | gh pr comment ${{ github.event.pull_request.number }} --body-file -
+          # Generate drift details
+          DRIFT_DETAILS=$(jq -r '.differences[]? | "- **\(.field)**: actual=`\(.actual)`, expected=`\(.expected)`"' drift-result.json | head -20)
+          
+          # Replace placeholders
+          sed -i "s/DRIFT_COUNT_PLACEHOLDER/$DRIFT_COUNT/g" pr-comment.md
+          sed -i "s|DRIFT_DETAILS_PLACEHOLDER|$DRIFT_DETAILS|g" pr-comment.md
+          
+          gh pr comment ${{ github.event.pull_request.number }} --body-file pr-comment.md
       
       - name: Add labels to PR
         if: steps.check.outputs.drift == 'true'
@@ -158,18 +177,21 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh pr comment ${{ github.event.pull_request.number }} --body "## ✅ No Branch Protection Drift\n\nThe proposed configuration matches the current branch protection settings."
+          gh pr comment ${{ github.event.pull_request.number }} --body "## ✅ No Branch Protection Drift
+
+          The proposed configuration matches the current branch protection settings."
 
   show-current:
     name: Show Current Protection
     runs-on: ubuntu-latest
-    if: github.event.inputs.action == 'show-current' || github.event_name == 'workflow_dispatch'
+    if: github.event.inputs.action == 'show-current' || (github.event_name == 'workflow_dispatch' && github.event.inputs.action != 'apply' && github.event.inputs.action != 'validate')
     permissions:
       contents: read
     steps:
       - name: Get current branch protection
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "🔒 Current branch protection for main:"
           gh api repos/${{ github.repository }}/branches/main/protection \
@@ -206,8 +228,12 @@ jobs:
         id: drift
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "🔍 Checking for configuration drift..."
+          
+          # Verify gh authentication
+          gh auth status || echo "⚠️  Warning: gh authentication may have issues"
           
           if ./scripts/repocheck ${{ github.repository }} ${{ steps.detect-config.outputs.config_file }} text; then
             echo "✅ No drift detected - configuration matches"
@@ -265,7 +291,11 @@ jobs:
             echo "📝 Created new drift detection issue"
           else
             echo "ℹ️ Drift issue already exists: #$EXISTING"
-            gh issue comment $EXISTING --body "Drift still detected on $(date -u +\"%Y-%m-%d %H:%M:%S UTC\")\n\n$DRIFT_DETAILS\n\nWorkflow: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            gh issue comment $EXISTING --body "Drift still detected on $(date -u +\"%Y-%m-%d %H:%M:%S UTC\")
+
+          $DRIFT_DETAILS
+
+          Workflow: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           fi
 
   apply:
@@ -287,9 +317,34 @@ jobs:
       name: branch-protection-admin
       url: https://github.com/${{ github.repository }}/settings/branches
     
+    permissions:
+      contents: read
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
+      
+      - name: Install yq for YAML parsing
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+      
+      - name: Detect and prepare configuration
+        id: prepare-config
+        run: |
+          if [ -f ".github/branch-protection.yml" ]; then
+            echo "config_file=.github/branch-protection.yml" >> $GITHUB_OUTPUT
+            echo "✅ Using YAML configuration"
+            # Convert YAML to JSON for API
+            yq eval -o=json '.branch_protection' .github/branch-protection.yml > /tmp/config.json
+          elif [ -f "config/branch-protection.json" ]; then
+            echo "config_file=config/branch-protection.json" >> $GITHUB_OUTPUT
+            echo "✅ Using legacy JSON configuration"
+            cp config/branch-protection.json /tmp/config.json
+          else
+            echo "❌ No configuration file found"
+            exit 1
+          fi
       
       - name: Get current protection
         id: current
@@ -303,28 +358,6 @@ jobs:
           
           cat current-full.json
         continue-on-error: true
-      
-      - name: Install yq for YAML parsing
-        run: |
-          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-          sudo chmod +x /usr/local/bin/yq
-      
-      - name: Detect and prepare configuration
-        id: prepare-config
-        run: |
-          if [ -f ".github/branch-protection.yml" ]; then
-            echo "config_file=.github/branch-protection.yml" >> $GITHUB_OUTPUT
-            echo "Using YAML configuration"
-            # Convert YAML to JSON for API
-            yq eval -o=json '.branch_protection' .github/branch-protection.yml > /tmp/config.json
-          elif [ -f "config/branch-protection.json" ]; then
-            echo "config_file=config/branch-protection.json" >> $GITHUB_OUTPUT
-            echo "Using legacy JSON configuration"
-            cp config/branch-protection.json /tmp/config.json
-          else
-            echo "❌ No configuration file found"
-            exit 1
-          fi
       
       - name: Show changes
         run: |
@@ -388,6 +421,8 @@ jobs:
     needs: apply
     runs-on: ubuntu-latest
     if: always() && needs.apply.result != 'skipped'
+    permissions:
+      contents: read
     steps:
       - name: Report status
         run: |

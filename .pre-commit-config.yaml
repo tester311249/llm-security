@@ -1,0 +1,49 @@
+# Pre-commit hooks for branch protection validation
+# Install: pip install pre-commit && pre-commit install
+# Run manually: pre-commit run --all-files
+
+repos:
+  # Standard pre-commit hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      # YAML validation
+      - id: check-yaml
+        name: Check YAML syntax
+        files: \.(yaml|yml)$
+        
+      # File formatting
+      - id: end-of-file-fixer
+        name: Fix end of files
+        
+      - id: trailing-whitespace
+        name: Trim trailing whitespace
+        
+      # Security checks
+      - id: detect-private-key
+        name: Detect private keys
+        
+      - id: check-merge-conflict
+        name: Check for merge conflicts
+
+  # Custom local hooks for branch protection
+  - repo: local
+    hooks:
+      # Validate branch protection schema
+      - id: validate-branch-protection-schema
+        name: Validate Branch Protection Schema
+        entry: scripts/validate-schema.sh
+        language: system
+        files: \.github/branch-protection\.yml$
+        pass_filenames: true
+        stages: [commit]
+        
+      # Validate branch protection against live config (optional)
+      - id: check-branch-protection-drift
+        name: Check Branch Protection Drift (optional)
+        entry: bash -c 'if command -v gh &>/dev/null; then scripts/repocheck tester311249/llm-security .github/branch-protection.yml text || echo "⚠️  Drift detected - review before committing"; else echo "⚠️  GitHub CLI not found, skipping drift check"; fi'
+        language: system
+        files: \.github/branch-protection\.yml$
+        pass_filenames: false
+        stages: [manual]
+        verbose: true
