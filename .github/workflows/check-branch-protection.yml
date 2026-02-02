@@ -115,8 +115,12 @@ jobs:
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "🔍 Checking for configuration drift..."
+          # Verify gh is authenticated
+          gh auth status || echo "⚠️  Warning: gh authentication may have issues"
+          
           # Run repocheck and capture output
           if ./scripts/repocheck ${{ github.repository }} ${{ steps.detect-config.outputs.config_file }} json > drift-result.json 2>&1; then
             echo "drift=false" >> $GITHUB_OUTPUT
@@ -187,6 +191,7 @@ jobs:
       - name: Get current branch protection
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "🔒 Current branch protection for main:"
           gh api repos/${{ github.repository }}/branches/main/protection \
@@ -223,8 +228,12 @@ jobs:
         id: drift
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "🔍 Checking for configuration drift..."
+          
+          # Verify gh authentication
+          gh auth status || echo "⚠️  Warning: gh authentication may have issues"
           
           if ./scripts/repocheck ${{ github.repository }} ${{ steps.detect-config.outputs.config_file }} text; then
             echo "✅ No drift detected - configuration matches"
