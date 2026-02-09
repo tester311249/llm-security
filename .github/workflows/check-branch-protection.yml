@@ -43,7 +43,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       
       - name: Install yq for YAML parsing
         run: |
@@ -94,7 +94,7 @@ jobs:
       pull-requests: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       
       - name: Install yq for YAML parsing
         run: |
@@ -208,7 +208,7 @@ jobs:
       issues: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       
       - name: Install yq for YAML parsing
         run: |
@@ -248,7 +248,7 @@ jobs:
       
       - name: Upload drift report
         if: steps.drift.outputs.drift == 'true'
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: drift-report
           path: drift-report.json
@@ -322,7 +322,7 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       
       - name: Install yq for YAML parsing
         run: |
